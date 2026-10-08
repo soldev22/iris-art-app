@@ -118,6 +118,7 @@ export default function Group({ members, setMembers }) {
               <Slider label="Rotate whole piece" value={P.rotate} min={-180} max={180} step={1} fmt={v => v + '°'} onChange={v => setP('rotate', v)} />
               {P.style === 'collide' ? (<>
                 <Slider label="Overlap" value={P.overlap} min={0} max={0.8} step={0.01} fmt={pct} onChange={v => setP('overlap', v)} />
+                <Check label="Keep pupils clear where irises overlap" checked={P.pupilsOnTop} onChange={v => setP('pupilsOnTop', v)} />
                 <Slider label="Edge softness" value={P.soft} min={0} max={1} step={0.01} fmt={pct} onChange={v => setP('soft', v)} />
                 <div className="field"><div className="lab"><span>Where they meet</span></div>
                   <Seg label="Blend" value={P.blend} onChange={v => setP('blend', v)} options={[['blend', 'Blend'], ['screen', 'Glow'], ['multiply', 'Deepen'], ['difference', 'Contrast']]} /></div>

@@ -40,6 +40,7 @@ function makeSampleEye(variant=0){
           const cr=smooth(0.72,0.8,vnoise(ct*14,st*14+t*6,5))*smooth(0.1,0.3,t)*(1-smooth(0.6,0.8,t));
           mod*=1-0.5*cr; mod*=1-0.65*smooth(0.9,1,t); mod*=0.6+0.4*smooth(0,0.06,t);
           ic=[ic[0]*mod,ic[1]*mod,ic[2]*mod];
+          if(variant)ic=mix(ic,[24,34,62],1-smooth(prr*1.3,prr*1.45,r));
           ic=mix([9,8,9],ic,smooth(prr-1,prr+2,r));
         }
         col=mix(ic,sclera,smooth(IR-2,IR+3,r));

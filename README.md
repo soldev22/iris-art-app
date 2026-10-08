@@ -13,7 +13,7 @@ Upload an eye photo, isolate the iris, and turn it into art. Everything runs in 
 
 1. Upload an eye photo (or use the example eye; the button cycles two examples), check the rings, trim eyelids, adjust colour and focus. **Clean reflections and flash** (on by default) removes catchlights from the iris and pupil.
 2. Make single-eye art in Step 2, or press **Add this iris to the group** to keep the isolated iris. **Save isolated iris (PNG)** saves it as a transparent PNG.
-3. Add up to 6 irises (two for a couple, more for a family). In Step 3 choose **Colliding irises** or **Infinity loop** and save the group image. **Make all pupils the same size** (on by default) matches the pupils across the group. **Repaint pupils so they look identical** (on by default) redraws every pupil as the same clean disc, with your choice of colour and edge softness. The group is kept in the browser (IndexedDB) between visits.
+3. Add up to 6 irises (two for a couple, more for a family). In Step 3 choose **Colliding irises** or **Infinity loop** and save the group image. **Make all pupils the same size** (on by default) matches the pupils across the group. **Repaint pupils so they look identical** (on by default) redraws every pupil as the same clean disc, with your choice of colour and edge softness. The pupil size is measured to the end of any dark rim around it. **Keep pupils clear where irises overlap** stops a neighbouring iris washing over a pupil. The group is kept in the browser (IndexedDB) between visits.
 
 ## Layout
 

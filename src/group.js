@@ -6,7 +6,7 @@ export const GROUP_DEFAULTS = {
   overlap: 0.45, soft: 0.35, blend: 'blend',
   width: 0.4, gap: 0.35, fibre: 5,
   matchPupil: true, pupil: null,
-  repaint: true, pupilColour: '#08080a', pupilSoft: 0.35
+  repaint: true, pupilColour: '#08080a', pupilSoft: 0.35, pupilsOnTop: true
 };
 
 const TAU = Math.PI * 2;
@@ -29,18 +29,41 @@ function makeThumb(disc, size = 160) {
   return c.toDataURL('image/png');
 }
 
+// The detected pupil edge can sit on the inner edge of a dark rim. Find where the dark area really ends:
+// the radius where ring brightness is halfway between the pupil and the mid-iris.
+function darkEdge(disc, prFrac) {
+  const W = disc.width, R = W / 2, d = disc.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, W).data;
+  const ringL = rf => {
+    let s = 0, n = 0;
+    for (let k = 0; k < 120; k++) {
+      const th = k / 120 * TAU, x = Math.round(R + rf * R * Math.cos(th)), y = Math.round(R + rf * R * Math.sin(th)), i = (y * W + x) * 4;
+      if (d[i + 3] < 200) continue;
+      s += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]; n++;
+    }
+    return n ? s / n : null;
+  };
+  const lp = ringL(prFrac * 0.5), mids = [];
+  for (let rf = 0.55; rf <= 0.86; rf += 0.05) { const l = ringL(rf); if (l != null) mids.push(l); }
+  if (lp == null || !mids.length) return prFrac;
+  mids.sort((a, b) => a - b);
+  const thr = lp + 0.5 * (mids[mids.length >> 1] - lp), maxR = Math.min(0.65, prFrac + 0.14);
+  for (let rf = prFrac * 0.9; rf <= maxR; rf += 0.004) { const l = ringL(rf); if (l != null && l >= thr) return Math.max(prFrac, rf); }
+  return prFrac;
+}
+const edge = m => (m.prDark != null ? m.prDark : m.prFrac);
+
 export async function buildMember(A, name) {
   const { disc, prFrac } = makeDisc(A);
   const blob = await new Promise(r => disc.toBlob(r, 'image/png'));
   const id = 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-  return { id, name, prFrac, disc, blob, thumb: makeThumb(disc) };
+  return { id, name, prFrac, prDark: darkEdge(disc, prFrac), disc, blob, thumb: makeThumb(disc) };
 }
 
 export async function restoreMember(rec) {
   const bmp = await createImageBitmap(rec.blob);
   const c = mk(bmp.width, bmp.height);
   c.getContext('2d').drawImage(bmp, 0, 0);
-  return { id: rec.id, name: rec.name, prFrac: rec.prFrac, disc: c, blob: rec.blob, thumb: makeThumb(c) };
+  return { id: rec.id, name: rec.name, prFrac: rec.prFrac, prDark: darkEdge(c, rec.prFrac), disc: c, blob: rec.blob, thumb: makeThumb(c) };
 }
 
 /* ---------- Matching pupil sizes ----------
@@ -48,11 +71,11 @@ export async function restoreMember(rec) {
    rest of the iris is stretched to fit, so the iris edge stays put and the fibres keep their angles. */
 
 export function avgPupil(members) {
-  return members.length ? members.reduce((s, m) => s + m.prFrac, 0) / members.length : 0.3;
+  return members.length ? members.reduce((s, m) => s + edge(m), 0) / members.length : 0.3;
 }
 
 function warpPupil(m, target) {
-  const d = m.disc, W = d.width, R = W / 2, p = m.prFrac;
+  const d = m.disc, W = d.width, R = W / 2, p = edge(m);
   const src = d.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, d.height).data;
   const c = mk(W, d.height), x = c.getContext('2d'), out = x.createImageData(W, d.height), od = out.data;
   for (let y = 0; y < d.height; y++) {
@@ -84,7 +107,7 @@ function paintPupil(disc, target, paint) {
 }
 
 function viewOf(m, target, paint) {
-  const same = Math.abs(target - m.prFrac) < 0.004;
+  const same = Math.abs(target - edge(m)) < 0.004;
   if (same && !paint) return m;
   const key = Math.round(target * 200) + '|' + (paint ? paint.col + '|' + Math.round(paint.soft * 100) : '');
   m.views = m.views || {};
@@ -100,7 +123,7 @@ function viewOf(m, target, paint) {
 function prepared(members, P) {
   const target = P.matchPupil && members.length > 1 ? clamp(P.pupil == null ? avgPupil(members) : P.pupil, 0.15, 0.65) : null;
   const paint = P.repaint ? { col: P.pupilColour, soft: P.pupilSoft } : null;
-  return members.map(m => viewOf(m, target == null ? m.prFrac : target, paint));
+  return members.map(m => viewOf(m, target == null ? edge(m) : target, paint));
 }
 
 /* ---------- Ribbon texture: the iris unwrapped, mirrored so the pupil side runs down the middle ---------- */
@@ -177,6 +200,16 @@ function softDisc(m, soft) {
   return c;
 }
 
+// Just the pupil of an iris, with a soft edge, to lay on top so overlaps never wash a pupil out.
+function pupilOnly(m) {
+  const d = m.disc, R = d.width / 2, e = edge(m), f = 0.012, c = mk(d.width, d.height), x = c.getContext('2d');
+  x.drawImage(d, 0, 0);
+  const g = x.createRadialGradient(R, R, R * (e - f), R, R, R * (e + f));
+  g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+  x.globalCompositeOperation = 'destination-in'; x.fillStyle = g; x.fillRect(0, 0, d.width, d.height);
+  return c;
+}
+
 function renderCollide(members, P, L) {
   const { cs, f } = plan(members.length, P, L);
   const art = mk(f.W, f.H), x = art.getContext('2d');
@@ -188,6 +221,12 @@ function renderCollide(members, P, L) {
     x.drawImage(sd, px - r, py - r, 2 * r, 2 * r);
   });
   x.globalCompositeOperation = 'source-over';
+  if (P.pupilsOnTop && members.length > 1) {
+    members.forEach((m, i) => {
+      const r = f.scale, px = (cs[i][0] + f.ox) * f.scale, py = (cs[i][1] + f.oy) * f.scale;
+      x.drawImage(pupilOnly(m), px - r, py - r, 2 * r, 2 * r);
+    });
+  }
   return art;
 }
 
