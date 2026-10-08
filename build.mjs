@@ -10,7 +10,7 @@ const fonts = '<link rel="preconnect" href="https://fonts.googleapis.com"><link 
 async function once() {
   const r = await build({
     entryPoints: ['src/main.jsx'], bundle: true, minify: true, write: false, format: 'iife', target: 'es2020',
-    define: { 'process.env.NODE_ENV': '"production"' }, jsx: 'automatic', legalComments: 'none',
+    define: { 'process.env.NODE_ENV': '"production"', __BUILD__: JSON.stringify(new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC') }, jsx: 'automatic', legalComments: 'none',
   });
   const js = r.outputFiles[0].text;
   // Optional web fonts load when online; offline the page falls back to system fonts.

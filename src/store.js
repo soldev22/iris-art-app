@@ -31,7 +31,7 @@ export async function saveGroup(items) {
     await new Promise((res, rej) => {
       const tx = db.transaction(ST, 'readwrite'), s = tx.objectStore(ST);
       s.clear();
-      items.forEach((it, i) => s.put({ id: it.id, order: i, name: it.name, prFrac: it.prFrac, blob: it.blob }));
+      items.forEach((it, i) => s.put({ id: it.id, order: i, name: it.name, prFrac: it.prFrac, prDark: it.prDark, blob: it.blob }));
       tx.oncomplete = res; tx.onerror = () => rej(tx.error);
     });
     db.close();

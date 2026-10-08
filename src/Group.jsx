@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Slider, Check, Seg, pct } from './ui.jsx';
-import { renderGroup, groupDims, avgPupil, GROUP_DEFAULTS, MAX_GROUP } from './group.js';
+import { renderGroup, groupDims, avgPupil, edge, GROUP_DEFAULTS, MAX_GROUP } from './group.js';
 import { compose } from './engine.js';
 import { deliver, toBlob } from './deliver.js';
 
@@ -39,6 +39,7 @@ export default function Group({ members, setMembers }) {
   }, [members, P, bg, transparent]);
 
   const rename = (id, name) => setMembers(a => a.map(m => m.id === id ? { ...m, name } : m));
+  const setEdge = (id, v) => setMembers(a => a.map(m => m.id === id ? { ...m, prDark: v } : m));
   const remove = id => setMembers(a => a.filter(m => m.id !== id));
   const move = (i, d) => setMembers(a => { const b = a.slice(), j = i + d; if (j < 0 || j >= b.length) return a; [b[i], b[j]] = [b[j], b[i]]; return b; });
 
@@ -62,14 +63,19 @@ export default function Group({ members, setMembers }) {
   return (
     <section className="panel group" aria-labelledby="h-group">
       <div className="ph"><span className="step">Step 3</span><h2 id="h-group">Iris group</h2><span className="mono">{n} of {MAX_GROUP}</span></div>
-      <p className="hint">Isolate each eye in Step 1 and press Add this iris to the group. Two is typical for a couple, up to six for a family. The group is kept in this browser between visits.</p>
+      <p className="hint">The ring on each card marks where that pupil ends. If a dark rim is left outside it, drag Pupil edge out until the ring sits on the outer edge. Isolate each eye in Step 1 and press Add this iris to the group. Two is typical for a couple, up to six for a family. The group is kept in this browser between visits.</p>
       <div className="tray">
         {Array.from({ length: MAX_GROUP }).map((_, i) => {
           const m = members[i];
           return m ? (
             <div className="slot filled" key={m.id}>
-              <img src={m.thumb} alt={'Iris of ' + m.name} />
+              <div className="thumbwrap">
+                <img src={m.thumb} alt={'Iris of ' + m.name} />
+                <div className="ring" style={{ width: (edge(m) * 100) + '%' }}></div>
+              </div>
               <input aria-label={'Name for iris ' + (i + 1)} value={m.name} maxLength={24} onChange={e => rename(m.id, e.target.value)} />
+              <Slider label="Pupil edge" value={edge(m)} min={0.12} max={0.6} step={0.005} fmt={pct} onChange={v => setEdge(m.id, v)} />
+              {Math.abs(edge(m) - m.prAuto) > 0.004 ? <button className="mini" onClick={() => setEdge(m.id, m.prAuto)}>Back to automatic</button> : null}
               <div className="slotbtns">
                 <button className="mini" aria-label="Move earlier" disabled={i === 0} onClick={() => move(i, -1)}>&larr;</button>
                 <button className="mini" aria-label="Move later" disabled={i === n - 1} onClick={() => move(i, 1)}>&rarr;</button>

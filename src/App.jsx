@@ -221,7 +221,7 @@ export default function App() {
   return (
     <>
       <header className="top">
-        <div className="brand"><h1>Iris Studio</h1><span className="sub">Photograph in, iris out, art made from it.</span></div>
+        <div className="brand"><h1>Iris Studio</h1><span className="sub">Photograph in, iris out, art made from it.</span><span className="mono" title="Build time of this version">Build {__BUILD__}</span></div>
         <div className="spacer"></div>
         <div className="btns">
           <button className="btn primary" onClick={() => fileRef.current.click()}>Upload eye photo</button>

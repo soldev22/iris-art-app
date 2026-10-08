@@ -93,3 +93,8 @@ body{margin:0}
 @media (min-width:980px){.gsplit{grid-template-columns:minmax(0,5fr) minmax(0,7fr)}}
 .gcontrols{display:flex;flex-direction:column;gap:14px;min-width:0}
 .gpreview{min-width:0}
+
+.thumbwrap{position:relative;line-height:0}
+.thumbwrap .ring{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);aspect-ratio:1;border:1.5px solid var(--accent);border-radius:50%;pointer-events:none;box-shadow:0 0 0 1px rgba(0,0,0,.45)}
+.slot .field{gap:2px}
+.slot .lab{font-size:12px}

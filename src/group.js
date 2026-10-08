@@ -29,41 +29,56 @@ function makeThumb(disc, size = 160) {
   return c.toDataURL('image/png');
 }
 
-// The detected pupil edge can sit on the inner edge of a dark rim. Find where the dark area really ends:
-// the radius where ring brightness is halfway between the pupil and the mid-iris.
+// The detected pupil edge can sit on the inner edge of a dark rim. Look just outside it for the steepest
+// brightening (the outer edge of the dark area) and use that instead when it is a clear step.
 function darkEdge(disc, prFrac) {
   const W = disc.width, R = W / 2, d = disc.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, W).data;
-  const ringL = rf => {
-    let s = 0, n = 0;
+  const ringL = (rf, q) => {
+    const v = [];
     for (let k = 0; k < 120; k++) {
       const th = k / 120 * TAU, x = Math.round(R + rf * R * Math.cos(th)), y = Math.round(R + rf * R * Math.sin(th)), i = (y * W + x) * 4;
       if (d[i + 3] < 200) continue;
-      s += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]; n++;
+      v.push(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]);
     }
-    return n ? s / n : null;
+    if (v.length < 30) return null;
+    v.sort((a, b) => a - b);
+    return v[Math.floor(v.length * q)];
   };
-  const lp = ringL(prFrac * 0.5), mids = [];
-  for (let rf = 0.55; rf <= 0.86; rf += 0.05) { const l = ringL(rf); if (l != null) mids.push(l); }
+  const lp = ringL(prFrac * 0.5, 0.5), mids = [];
+  for (let rf = 0.55; rf <= 0.86; rf += 0.05) { const l = ringL(rf, 0.5); if (l != null) mids.push(l); }
   if (lp == null || !mids.length) return prFrac;
   mids.sort((a, b) => a - b);
-  const thr = lp + 0.5 * (mids[mids.length >> 1] - lp), maxR = Math.min(0.65, prFrac + 0.14);
-  for (let rf = prFrac * 0.9; rf <= maxR; rf += 0.004) { const l = ringL(rf); if (l != null && l >= thr) return Math.max(prFrac, rf); }
-  return prFrac;
+  const contrast = mids[mids.length >> 1] - lp, maxR = Math.min(0.65, prFrac + 0.2), step = 0.004, prof = [];
+  for (let rf = prFrac * 0.92; rf <= maxR + 0.03; rf += step) prof.push([rf, ringL(rf, 0.3)]);
+  const gr = [];
+  let best = 0;
+  for (let i = 3; i < prof.length - 3; i++) {
+    const a = prof[i - 3][1], b = prof[i + 3][1];
+    const v = a == null || b == null || prof[i][0] > maxR ? 0 : b - a;
+    gr.push([prof[i][0], v]);
+    if (v > best) best = v;
+  }
+  // outermost local peak that is still a strong step: that is where the dark rim ends
+  let bestRf = prFrac;
+  for (let i = 1; i < gr.length - 1; i++) if (gr[i][1] >= 0.25 * best && ringL(gr[i][0] - 0.02, 0.5) < lp + 0.85 * contrast && gr[i][1] >= gr[i - 1][1] && gr[i][1] >= gr[i + 1][1]) bestRf = gr[i][0];
+  return best > 0.3 * contrast && bestRf > prFrac * 1.06 ? Math.min(0.65, bestRf + 0.008) : prFrac;
 }
-const edge = m => (m.prDark != null ? m.prDark : m.prFrac);
+export const edge = m => (m.prDark != null ? m.prDark : m.prFrac);
 
 export async function buildMember(A, name) {
   const { disc, prFrac } = makeDisc(A);
   const blob = await new Promise(r => disc.toBlob(r, 'image/png'));
   const id = 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-  return { id, name, prFrac, prDark: darkEdge(disc, prFrac), disc, blob, thumb: makeThumb(disc) };
+  const auto = darkEdge(disc, prFrac);
+  return { id, name, prFrac, prAuto: auto, prDark: auto, disc, blob, thumb: makeThumb(disc) };
 }
 
 export async function restoreMember(rec) {
   const bmp = await createImageBitmap(rec.blob);
   const c = mk(bmp.width, bmp.height);
   c.getContext('2d').drawImage(bmp, 0, 0);
-  return { id: rec.id, name: rec.name, prFrac: rec.prFrac, prDark: darkEdge(c, rec.prFrac), disc: c, blob: rec.blob, thumb: makeThumb(c) };
+  const auto = darkEdge(c, rec.prFrac);
+  return { id: rec.id, name: rec.name, prFrac: rec.prFrac, prAuto: auto, prDark: rec.prDark != null ? rec.prDark : auto, disc: c, blob: rec.blob, thumb: makeThumb(c) };
 }
 
 /* ---------- Matching pupil sizes ----------
@@ -109,7 +124,7 @@ function paintPupil(disc, target, paint) {
 function viewOf(m, target, paint) {
   const same = Math.abs(target - edge(m)) < 0.004;
   if (same && !paint) return m;
-  const key = Math.round(target * 200) + '|' + (paint ? paint.col + '|' + Math.round(paint.soft * 100) : '');
+  const key = Math.round(target * 200) + '|' + Math.round(edge(m) * 1000) + '|' + (paint ? paint.col + '|' + Math.round(paint.soft * 100) : '');
   m.views = m.views || {};
   if (!m.views[key]) {
     let disc = same ? m.disc : warpPupil(m, target);
