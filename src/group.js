@@ -4,7 +4,8 @@ export const MAX_GROUP = 6;
 export const GROUP_DEFAULTS = {
   style: 'collide', layout: 'line', rotate: 0,
   overlap: 0.45, soft: 0.35, blend: 'blend',
-  width: 0.4, gap: 0.35, fibre: 5
+  width: 0.4, gap: 0.35, fibre: 5,
+  matchPupil: true, pupil: null
 };
 
 const TAU = Math.PI * 2;
@@ -39,6 +40,48 @@ export async function restoreMember(rec) {
   const c = mk(bmp.width, bmp.height);
   c.getContext('2d').drawImage(bmp, 0, 0);
   return { id: rec.id, name: rec.name, prFrac: rec.prFrac, disc: c, blob: rec.blob, thumb: makeThumb(c) };
+}
+
+/* ---------- Matching pupil sizes ----------
+   Each disc is warped radially: the pupil is rescaled to the target fraction of the iris radius and the
+   rest of the iris is stretched to fit, so the iris edge stays put and the fibres keep their angles. */
+
+export function avgPupil(members) {
+  return members.length ? members.reduce((s, m) => s + m.prFrac, 0) / members.length : 0.3;
+}
+
+function warpPupil(m, target) {
+  const d = m.disc, W = d.width, R = W / 2, p = m.prFrac;
+  const src = d.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, d.height).data;
+  const c = mk(W, d.height), x = c.getContext('2d'), out = x.createImageData(W, d.height), od = out.data;
+  for (let y = 0; y < d.height; y++) {
+    for (let xx = 0; xx < W; xx++) {
+      const dx = xx + 0.5 - R, dy = y + 0.5 - R, rho = Math.hypot(dx, dy) / R;
+      if (rho >= 1) continue;
+      const sr = rho < target ? rho / target * p : p + (rho - target) / (1 - target) * (1 - p), f = rho > 0 ? sr / rho : 0;
+      const px = R + dx * f - 0.5, py = R + dy * f - 0.5, x0 = Math.floor(px), y0 = Math.floor(py), fx = px - x0, fy = py - y0;
+      const i00 = (y0 * W + x0) * 4, i10 = i00 + 4, i01 = i00 + W * 4, i11 = i01 + 4, o = (y * W + xx) * 4;
+      for (let ch = 0; ch < 4; ch++) {
+        od[o + ch] = (src[i00 + ch] * (1 - fx) + src[i10 + ch] * fx) * (1 - fy) + (src[i01 + ch] * (1 - fx) + src[i11 + ch] * fx) * fy;
+      }
+    }
+  }
+  x.putImageData(out, 0, 0);
+  return c;
+}
+
+function viewOf(m, target) {
+  if (Math.abs(target - m.prFrac) < 0.004) return m;
+  const key = Math.round(target * 200);
+  m.views = m.views || {};
+  if (!m.views[key]) m.views[key] = { id: m.id, disc: warpPupil(m, target), prFrac: target };
+  return m.views[key];
+}
+
+function matched(members, P) {
+  if (!P.matchPupil || members.length < 2) return members;
+  const target = clamp(P.pupil == null ? avgPupil(members) : P.pupil, 0.15, 0.65);
+  return members.map(m => viewOf(m, target));
 }
 
 /* ---------- Ribbon texture: the iris unwrapped, mirrored so the pupil side runs down the middle ---------- */
@@ -197,6 +240,7 @@ function renderInfinity(members, P, L) {
   return art;
 }
 
-export function renderGroup(members, P, L) {
+export function renderGroup(rawMembers, P, L) {
+  const members = matched(rawMembers, P);
   return P.style === 'infinity' ? renderInfinity(members, P, L) : renderCollide(members, P, L);
 }

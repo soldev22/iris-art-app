@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Slider, Check, Seg, pct } from './ui.jsx';
-import { renderGroup, groupDims, GROUP_DEFAULTS, MAX_GROUP } from './group.js';
+import { renderGroup, groupDims, avgPupil, GROUP_DEFAULTS, MAX_GROUP } from './group.js';
 import { compose } from './engine.js';
 import { deliver, toBlob } from './deliver.js';
 
@@ -96,6 +96,15 @@ export default function Group({ members, setMembers }) {
                 <div className="field"><div className="lab"><span>Arrangement</span></div>
                   <Seg label="Arrangement" value={P.layout} onChange={v => setP('layout', v)} options={[['line', 'In a line'], ['ring', 'In a ring']]} /></div>
               ) : null}
+              {n > 1 ? (<>
+                <Check label="Make all pupils the same size" checked={P.matchPupil} onChange={v => setP('matchPupil', v)} />
+                {P.matchPupil ? (
+                  <div className="field">
+                    <Slider label="Pupil size (share of iris width)" value={P.pupil == null ? avgPupil(members) : P.pupil} min={0.2} max={0.6} step={0.01} fmt={pct} onChange={v => setP('pupil', v)} />
+                    {P.pupil != null ? <button className="mini" onClick={() => setP('pupil', null)}>Use the group average</button> : null}
+                  </div>
+                ) : null}
+              </>) : null}
               <Slider label="Rotate whole piece" value={P.rotate} min={-180} max={180} step={1} fmt={v => v + '°'} onChange={v => setP('rotate', v)} />
               {P.style === 'collide' ? (<>
                 <Slider label="Overlap" value={P.overlap} min={0} max={0.8} step={0.01} fmt={pct} onChange={v => setP('overlap', v)} />

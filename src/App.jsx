@@ -17,7 +17,7 @@ const STYLES = [
 ];
 const DEFAULTS = { rebuild: true, segments: 8, rotate: 0, source: 0, twist: 0, inner: 0, outer: 1, flip: false, fullFrame: false, keepPupil: true, feather: 0.25,
   bands: 48, gap: 0.12, detail: 0.5, aspect: 3.5, mirror: false, dots: 40000, dotSize: 3, layout: 'radial', cells: 60, gain: 1.05 };
-const GRADE0 = { sat: 1, con: 1, hue: 0, bri: 1, sharp: 0.4, clar: 0.15 };
+const GRADE0 = { sat: 1, con: 1, hue: 0, bri: 1, sharp: 0.4, clar: 0.15, clean: 0.6 };
 const SIZES = [1600, 2400, 3600, 4800];
 const PS = Math.min(1400, Math.round(900 * Math.max(1, window.devicePixelRatio || 1)));
 
@@ -64,7 +64,7 @@ export default function App() {
   const [over, setOver] = useState(false);
   const [cur, setCur] = useState('default');
   const [members, setMembers] = useState([]);
-  const groupLoaded = useRef(false);
+  const groupLoaded = useRef(false), exampleN = useRef(0);
   const viewRef = useRef(), prevRef = useRef(), svgRef = useRef(), fileRef = useRef(), cache = useRef(null), drag = useRef(null);
   const setP = (k, v) => setPR(o => ({ ...o, [k]: v }));
   const say = (text, err) => setStatus({ text, err: !!err });
@@ -118,7 +118,7 @@ export default function App() {
         const key = src.id + JSON.stringify([circ, trim, grade]);
         let A = cache.current;
         if (!A || A.key !== key) {
-          const crop = makeCrop(src.canvas, circ, grade), polar = makePolar(crop, circ, trim);
+          const crop = makeCrop(src.canvas, circ, grade, trim), polar = makePolar(crop, circ, trim);
           A = { key, circ, trim, crop, polar }; cache.current = A;
           const m = meanColour(polar); setAccent(m[0], m[1], m[2]);
         }
@@ -225,7 +225,7 @@ export default function App() {
         <div className="spacer"></div>
         <div className="btns">
           <button className="btn primary" onClick={() => fileRef.current.click()}>Upload eye photo</button>
-          <button className="btn" onClick={() => setSrc({ id: ++srcCounter, canvas: makeSampleEye(), name: 'Example eye', sample: true })}>Example eye</button>
+          <button className="btn" onClick={() => { exampleN.current = (exampleN.current + 1) % 2; setSrc({ id: ++srcCounter, canvas: makeSampleEye(exampleN.current), name: 'Example eye', sample: true }); }}>Example eye</button>
         </div>
         <input ref={fileRef} id="file" type="file" accept="image/*" hidden onChange={e => { pick(e.target.files[0]); e.target.value = ''; }} />
       </header>
@@ -273,6 +273,7 @@ export default function App() {
               <Slider label="Saturation" value={grade.sat} min={0} max={2} step={0.01} fmt={pct} onChange={v => setGrade(o => ({ ...o, sat: v }))} />
               <Slider label="Contrast" value={grade.con} min={0.5} max={1.8} step={0.01} fmt={pct} onChange={v => setGrade(o => ({ ...o, con: v }))} />
               <Slider label="Brightness" value={grade.bri} min={0.5} max={1.6} step={0.01} fmt={pct} onChange={v => setGrade(o => ({ ...o, bri: v }))} />
+              <Slider label="Clean reflections and flash" value={grade.clean} min={0} max={1} step={0.05} fmt={v => v <= 0 ? 'Off' : pct(v)} onChange={v => setGrade(o => ({ ...o, clean: v }))} />
               <Slider label="Sharpen fine detail" value={grade.sharp} min={0} max={2} step={0.05} fmt={pct} onChange={v => setGrade(o => ({ ...o, sharp: v }))} />
               <Slider label="Clarity (local contrast)" value={grade.clar} min={0} max={1} step={0.05} fmt={pct} onChange={v => setGrade(o => ({ ...o, clar: v }))} />
               <Slider label="Hue shift" value={grade.hue} min={-180} max={180} step={1} fmt={v => v + '°'} onChange={v => setGrade(o => ({ ...o, hue: v }))} />

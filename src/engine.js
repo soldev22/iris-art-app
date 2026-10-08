@@ -10,9 +10,9 @@ const TAU=Math.PI*2;
 function vnoise(x,y,s){const ix=Math.floor(x),iy=Math.floor(y),fx=x-ix,fy=y-iy,u=fx*fx*(3-2*fx),v=fy*fy*(3-2*fy);
   const h=(a,b)=>{const t=Math.sin(a*127.1+b*311.7+s*74.7)*43758.5453;return t-Math.floor(t)};
   return (h(ix,iy)*(1-u)+h(ix+1,iy)*u)*(1-v)+(h(ix,iy+1)*(1-u)+h(ix+1,iy+1)*u)*v}
-function makeSampleEye(){
+function makeSampleEye(variant=0){
   const W=1400,H=900,c=mk(W,H),x=c.getContext('2d'),im=x.createImageData(W,H),d=im.data;
-  const cx=690,cy=455,IR=250,PR=88;
+  const cx=690,cy=455,IR=250,PR=variant?56:88,pal=variant?{a:[150,92,40],b:[122,102,54],c:[84,62,40]}:{a:[186,124,52],b:[64,126,106],c:[44,92,122]};
   const mix=(a,b,t)=>[lerp(a[0],b[0],t),lerp(a[1],b[1],t),lerp(a[2],b[2],t)];
   for(let y=0;y<H;y++)for(let xx=0;xx<W;xx++){
     const dx=xx-cx,dy=y-cy,r=Math.hypot(dx,dy),th=Math.atan2(dy,dx),ct=Math.cos(th),st=Math.sin(th);
@@ -33,8 +33,8 @@ function makeSampleEye(){
         if(r<prr)ic=[9,8,9];
         else{
           const t=(r-prr)/(IR-prr);
-          ic=mix([186,124,52],[64,126,106],smooth(0.3,0.5,t));
-          ic=mix(ic,[44,92,122],smooth(0.6,0.95,t));
+          ic=mix(pal.a,pal.b,smooth(0.3,0.5,t));
+          ic=mix(ic,pal.c,smooth(0.6,0.95,t));
           const n=0.5*vnoise(ct*40+r*.02,st*40,1)+0.3*vnoise(ct*90,st*90+r*.03,2)+0.2*vnoise(ct*10+r*.05,st*10,3);
           let mod=0.55+0.9*n+Math.exp(-Math.pow((t-0.36)/0.04,2))*0.3;
           const cr=smooth(0.72,0.8,vnoise(ct*14,st*14+t*6,5))*smooth(0.1,0.3,t)*(1-smooth(0.6,0.8,t));
@@ -45,8 +45,8 @@ function makeSampleEye(){
         col=mix(ic,sclera,smooth(IR-2,IR+3,r));
       }else col=sclera;
       col=[col[0]*shade,col[1]*shade,col[2]*shade];
-      const h1=1-smooth(16,42,Math.hypot(xx-(cx-92),y-(cy-98))),h2=0.5*(1-smooth(10,26,Math.hypot(xx-(cx+110),y-(cy+122))));
-      col=mix(col,[255,255,255],Math.min(1,h1*0.92+h2));
+      const h1=1-smooth(16,42,Math.hypot(xx-(cx-92),y-(cy-98))),h2=0.5*(1-smooth(10,26,Math.hypot(xx-(cx+110),y-(cy+122)))),h3=0.9*(1-smooth(5,15,Math.hypot(xx-(cx+34),y-(cy-44))));
+      col=mix(col,[255,255,255],Math.min(1,h1*0.92+h2+h3));
     }
     const i=(y*W+xx)*4,g=(Math.random()-0.5)*5;
     d[i]=col[0]+g;d[i+1]=col[1]+g;d[i+2]=col[2]+g;d[i+3]=255;
@@ -115,11 +115,20 @@ function sharpen(d,w,h,amount,r){
     for(let i=0;i<w*h;i++)d[i*4+ch]=g[i]+(g[i]-bl[i])*amount;
   }
 }
-function makeCrop(src,circ,grade){
+function makeCrop(src,circ,grade,trim){
   const R=Math.ceil(circ.ir)+2,ox=Math.round(circ.cx)-R,oy=Math.round(circ.cy)-R,s=R*2;
   const c=mk(s,s),x=c.getContext('2d',{willReadFrequently:true});
   x.drawImage(src,-ox,-oy);
-  const id=x.getImageData(0,0,s,s);applyGrade(id.data,grade);
+  const id=x.getImageData(0,0,s,s);
+  const amt=grade.clean||0;
+  if(amt>0.001){
+    const tr=trim||{top:0,bot:0};
+    let uid=srcUid.get(src);if(!uid){uid=++uidCount;srcUid.set(src,uid)}
+    const key=JSON.stringify([uid,Math.round(circ.cx),Math.round(circ.cy),Math.round(circ.ir),Math.round(circ.pr),tr.top,tr.bot,amt]);
+    if(cleanMemo.key===key)id.data.set(cleanMemo.data);
+    else{cleanReflections({data:id.data,w:s,h:s,ox,oy},circ,tr,amt);cleanMemo={key,data:new Uint8ClampedArray(id.data)}}
+  }
+  applyGrade(id.data,grade);
   sharpen(id.data,s,s,grade.sharp,Math.max(1,Math.round(circ.ir/160)));
   sharpen(id.data,s,s,grade.clar,Math.max(2,Math.round(circ.ir/22)));
   return{data:id.data,w:s,h:s,ox,oy};
@@ -315,5 +324,108 @@ function compose(art,bg,transparent){
   x.drawImage(art,0,0);return c;
 }
 function hexLum(h){const n=parseInt(h.slice(1),16);return(.299*(n>>16)+.587*((n>>8)&255)+.114*(n&255))/255}
+
+/* ---------- Reflection and lens-flash cleanup ----------
+   Iris: highlights are found in the unwrapped iris (bright against their own ring), then replaced with
+   real fibre texture copied from a clean part of the same ring, with colour matched at the seams.
+   Pupil: bright glints are replaced with the pupil's own dark colour. */
+const srcUid=new WeakMap();let uidCount=0,cleanMemo={key:null,data:null};
+function cleanReflections(crop,circ,trim,amount){
+  const{data:d,w,h,ox,oy}=crop,{cx,cy,ir,pr}=circ,rd=ir*(0.015+0.03*amount),lo=pr+0.01*ir,hi=ir*0.965;
+  const yTop=cy-ir+2*ir*trim.top,yBot=cy+ir-2*ir*trim.bot;
+  const P=makePolar(crop,circ,trim),A=P.A,R=P.R,pd=P.data,valid=P.valid,N=A*R;
+  const L=new Float32Array(N);
+  for(let i=0;i<N;i++)L[i]=.299*pd[i*4]+.587*pd[i*4+1]+.114*pd[i*4+2];
+  const med=new Float32Array(R);
+  for(let r=0;r<R;r++){
+    const row=[];for(let a=0;a<A;a++)if(valid[r*A+a])row.push(L[r*A+a]);
+    if(row.length){const t=Float32Array.from(row);t.sort();med[r]=t[t.length>>1]}else med[r]=128;
+  }
+  const thr=90-70*amount;let cnt=0,vcount=0;const mask=new Uint8Array(N);
+  for(let r=0;r<R;r++)for(let a=0;a<A;a++){
+    const i=r*A+a;if(!valid[i])continue;vcount++;const l=L[i];
+    if((l>med[r]+thr&&l>150)||l>238){mask[i]=1;cnt++}
+  }
+  if(cnt>0&&cnt<0.35*vcount){
+    const m2=new Uint8Array(N),m3=new Uint8Array(N);
+    for(let r=0;r<R;r++){
+      const rho=lo+(r+.5)/R*(hi-lo),da=Math.min(A>>3,Math.max(1,Math.ceil(rd*A/(TAU*rho))));
+      for(let a=0;a<A;a++)if(mask[r*A+a])for(let k=-da;k<=da;k++)m2[r*A+(((a+k)%A)+A)%A]=1;
+    }
+    const dr=Math.max(1,Math.ceil(rd));
+    for(let r=0;r<R;r++)for(let a=0;a<A;a++)if(m2[r*A+a])for(let k=-dr;k<=dr;k++){const rr=r+k;if(rr>=0&&rr<R)m3[rr*A+a]=1}
+    const out=new Uint8ClampedArray(pd),seen=new Uint8Array(N),stI=new Int32Array(N),stU=new Int32Array(N),list=new Int32Array(N);
+    for(let s0=0;s0<N;s0++){
+      if(!m3[s0]||seen[s0])continue;
+      let sp=1,n=0,minU=0,maxU=0;stI[0]=s0;stU[0]=0;seen[s0]=1;
+      while(sp){
+        sp--;const i=stI[sp],u=stU[sp];list[n++]=i;if(u<minU)minU=u;if(u>maxU)maxU=u;
+        const r=(i/A)|0,a=i-r*A,push=(j,uu)=>{if(m3[j]&&!seen[j]){seen[j]=1;stI[sp]=j;stU[sp]=uu;sp++}};
+        push(r*A+(a+A-1)%A,u-1);push(r*A+(a+1)%A,u+1);if(r>0)push(i-A,u);if(r<R-1)push(i+A,u);
+      }
+      const width=maxU-minU+1,pad=Math.max(6,Math.round(width*0.3));let S=0;
+      for(let k=1;k<=8&&!S;k++)for(const sg of[1,-1]){
+        const cand=sg*k*(width+pad);if(Math.abs(cand)>A/2)continue;let ok=true;
+        for(let j=0;j<n;j++){const i=list[j],r=(i/A)|0,a=i-r*A,si=r*A+(((a+cand)%A)+A)%A;if(m3[si]||!valid[si]){ok=false;break}}
+        if(ok){S=cand;break}
+      }
+      for(let j=0;j<n;j++){
+        const i=list[j],r=(i/A)|0,a=i-r*A;let dl=1,dq=1;
+        while(dl<A&&m3[r*A+(((a-dl)%A)+A)%A])dl++;
+        while(dq<A&&m3[r*A+(a+dq)%A])dq++;
+        const il=r*A+(((a-dl)%A)+A)%A,iq=r*A+(a+dq)%A,t=dl/(dl+dq);
+        if(S){
+          const si=r*A+(((a+S)%A)+A)%A,sl=r*A+((((a-dl)+S)%A)+A)%A,sq=r*A+(((a+dq+S)%A)+A)%A;
+          const okl=!m3[sl]&&valid[sl]&&valid[il],okq=!m3[sq]&&valid[sq]&&valid[iq];
+          for(let ch=0;ch<3;ch++){
+            const dL=okl?pd[il*4+ch]-pd[sl*4+ch]:0,dQ=okq?pd[iq*4+ch]-pd[sq*4+ch]:0;
+            out[i*4+ch]=clamp(pd[si*4+ch]+dL*(1-t)+dQ*t,0,255);
+          }
+        }else for(let ch=0;ch<3;ch++)out[i*4+ch]=pd[il*4+ch]*(1-t)+pd[iq*4+ch]*t;
+      }
+    }
+    const clean={A,R,data:out},cm=new Float32Array(w*h),o=new Float32Array(3);
+    for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+      const px=x+.5+ox,py=y+.5+oy;if(py<yTop||py>yBot)continue;
+      const dx=px-cx,dy=py-cy,rho=Math.hypot(dx,dy);if(rho<pr||rho>hi)continue;
+      const r=Math.min(R-1,Math.floor((rho-lo)/(hi-lo)*R)),a=Math.floor((((Math.atan2(dy,dx)/TAU)%1)+1)%1*A)%A;
+      if(r>=0&&m3[r*A+a])cm[y*w+x]=1;
+    }
+    const rb=Math.max(1,Math.round(rd*0.35)),bl=boxBlur(boxBlur(cm,w,h,rb),w,h,rb);
+    for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+      const al=Math.min(1,bl[y*w+x]*1.6);if(al<0.02)continue;
+      const px=x+.5+ox,py=y+.5+oy;if(py<yTop||py>yBot)continue;
+      const dx=px-cx,dy=py-cy,rho=Math.hypot(dx,dy);if(rho<pr||rho>hi)continue;
+      polarAt(clean,clamp((rho-lo)/(hi-lo),0,1),(((Math.atan2(dy,dx)/TAU)%1)+1)%1,o);
+      const k=(y*w+x)*4;for(let ch=0;ch<3;ch++)d[k+ch]=d[k+ch]+(o[ch]-d[k+ch])*al;
+    }
+  }
+  // pupil glints
+  const vals=[];
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){const rho=Math.hypot(x+.5+ox-cx,y+.5+oy-cy);if(rho<pr*0.9){const k=(y*w+x)*4;vals.push(.299*d[k]+.587*d[k+1]+.114*d[k+2])}}
+  if(vals.length>20){
+    const sorted=Float32Array.from(vals).sort(),medP=sorted[sorted.length>>1];
+    let br=0,bg=0,bb=0,bn=0;
+    for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+      if(Math.hypot(x+.5+ox-cx,y+.5+oy-cy)>=pr*0.9)continue;const k=(y*w+x)*4;
+      if(.299*d[k]+.587*d[k+1]+.114*d[k+2]<=medP){br+=d[k];bg+=d[k+1];bb+=d[k+2];bn++}
+    }
+    br/=bn;bg/=bn;bb/=bn;
+    const thr2=10+40*(1-amount),pm=new Float32Array(w*h);let any=false;
+    for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+      const rho=Math.hypot(x+.5+ox-cx,y+.5+oy-cy);if(rho>=lo)continue;const k=(y*w+x)*4,l=.299*d[k]+.587*d[k+1]+.114*d[k+2];
+      if(rho<pr*0.97?l>medP+thr2:l>200){pm[y*w+x]=1;any=true}
+    }
+    if(any){
+      const rp=Math.max(2,Math.round(rd*0.9)),bp=boxBlur(boxBlur(pm,w,h,rp),w,h,rp);
+      for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+        const al=Math.min(1,bp[y*w+x]*3.2);if(al<0.02)continue;
+        if(Math.hypot(x+.5+ox-cx,y+.5+oy-cy)>=lo)continue;
+        const k=(y*w+x)*4,nz=(Math.random()-.5)*3;
+        d[k]+=(br+nz-d[k])*al;d[k+1]+=(bg+nz-d[k+1])*al;d[k+2]+=(bb+nz-d[k+2])*al;
+      }
+    }
+  }
+}
 
 export{mk,clamp,makeSampleEye,detectIris,makeCrop,makePolar,meanColour,RENDERERS,compose,hexLum};
