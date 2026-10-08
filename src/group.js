@@ -5,7 +5,8 @@ export const GROUP_DEFAULTS = {
   style: 'collide', layout: 'line', rotate: 0,
   overlap: 0.45, soft: 0.35, blend: 'blend',
   width: 0.4, gap: 0.35, fibre: 5,
-  matchPupil: true, pupil: null
+  matchPupil: true, pupil: null,
+  repaint: true, pupilColour: '#08080a', pupilSoft: 0.35
 };
 
 const TAU = Math.PI * 2;
@@ -70,18 +71,36 @@ function warpPupil(m, target) {
   return c;
 }
 
-function viewOf(m, target) {
-  if (Math.abs(target - m.prFrac) < 0.004) return m;
-  const key = Math.round(target * 200);
+// Paints a clean, uniform pupil over a copy of the disc: solid colour with a soft edge into the iris.
+function paintPupil(disc, target, paint) {
+  const c = mk(disc.width, disc.height), x = c.getContext('2d'), R = disc.width / 2, f = 0.006 + 0.03 * paint.soft;
+  x.drawImage(disc, 0, 0);
+  const ro = (target + f) * R, g = x.createRadialGradient(R, R, 0, R, R, ro), solid = clamp((target - f) / (target + f), 0, 0.999);
+  g.addColorStop(0, paint.col); g.addColorStop(solid, paint.col);
+  const n = parseInt(paint.col.slice(1), 16), rgb = (n >> 16) + ',' + ((n >> 8) & 255) + ',' + (n & 255);
+  g.addColorStop(1, 'rgba(' + rgb + ',0)');
+  x.fillStyle = g; x.beginPath(); x.arc(R, R, ro, 0, TAU); x.fill();
+  return c;
+}
+
+function viewOf(m, target, paint) {
+  const same = Math.abs(target - m.prFrac) < 0.004;
+  if (same && !paint) return m;
+  const key = Math.round(target * 200) + '|' + (paint ? paint.col + '|' + Math.round(paint.soft * 100) : '');
   m.views = m.views || {};
-  if (!m.views[key]) m.views[key] = { id: m.id, disc: warpPupil(m, target), prFrac: target };
+  if (!m.views[key]) {
+    let disc = same ? m.disc : warpPupil(m, target);
+    if (paint) disc = paintPupil(disc, target, paint);
+    m.views[key] = { id: m.id, disc, prFrac: target };
+  }
   return m.views[key];
 }
 
-function matched(members, P) {
-  if (!P.matchPupil || members.length < 2) return members;
-  const target = clamp(P.pupil == null ? avgPupil(members) : P.pupil, 0.15, 0.65);
-  return members.map(m => viewOf(m, target));
+// Members as they will be drawn: pupils matched in size and/or repainted, if switched on.
+function prepared(members, P) {
+  const target = P.matchPupil && members.length > 1 ? clamp(P.pupil == null ? avgPupil(members) : P.pupil, 0.15, 0.65) : null;
+  const paint = P.repaint ? { col: P.pupilColour, soft: P.pupilSoft } : null;
+  return members.map(m => viewOf(m, target == null ? m.prFrac : target, paint));
 }
 
 /* ---------- Ribbon texture: the iris unwrapped, mirrored so the pupil side runs down the middle ---------- */
@@ -241,6 +260,6 @@ function renderInfinity(members, P, L) {
 }
 
 export function renderGroup(rawMembers, P, L) {
-  const members = matched(rawMembers, P);
+  const members = prepared(rawMembers, P);
   return P.style === 'infinity' ? renderInfinity(members, P, L) : renderCollide(members, P, L);
 }

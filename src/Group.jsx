@@ -105,6 +105,16 @@ export default function Group({ members, setMembers }) {
                   </div>
                 ) : null}
               </>) : null}
+              <div className="field">
+                <Check label="Repaint pupils so they look identical" checked={P.repaint} onChange={v => setP('repaint', v)} />
+                {P.repaint ? (
+                  <div className="row">
+                    <input id="pupilcol" type="color" value={P.pupilColour} onChange={e => setP('pupilColour', e.target.value)} aria-label="Pupil colour" />
+                    <span className="mono">Pupil colour</span>
+                  </div>
+                ) : null}
+              </div>
+              {P.repaint ? <Slider label="Pupil edge softness" value={P.pupilSoft} min={0} max={1} step={0.01} fmt={pct} onChange={v => setP('pupilSoft', v)} /> : null}
               <Slider label="Rotate whole piece" value={P.rotate} min={-180} max={180} step={1} fmt={v => v + '°'} onChange={v => setP('rotate', v)} />
               {P.style === 'collide' ? (<>
                 <Slider label="Overlap" value={P.overlap} min={0} max={0.8} step={0.01} fmt={pct} onChange={v => setP('overlap', v)} />
