@@ -1,6 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { mk, clamp, makeSampleEye, detectIris, makeCrop, makePolar, meanColour, RENDERERS, compose, hexLum } from './engine.js';
 import { Slider, Check, Seg, StyleControls, pct } from './ui.jsx';
+import Group from './Group.jsx';
+import { buildMember, restoreMember, MAX_GROUP } from './group.js';
+import { loadGroup, saveGroup } from './store.js';
+import { deliver, toBlob } from './deliver.js';
 
 let srcCounter = 0;
 const STYLES = [
@@ -43,19 +47,6 @@ function renderArt(S, A, style, P, bg, transparent) {
   return compose(art, bg, transparent);
 }
 
-// Hands a finished image to the user: through the claude.ai viewer when embedded there, otherwise as a normal browser download.
-async function deliver(blob, filename) {
-  if (window.claude && window.claude.use) {
-    const dl = await window.claude.use('downloads');
-    if (!dl) throw new Error('Saving files is not available in this view.');
-    await dl.save({ filename, data: blob });
-    return;
-  }
-  const url = URL.createObjectURL(blob), a = document.createElement('a');
-  a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 15000);
-}
-
 export default function App() {
   const [src, setSrc] = useState(null);
   const [circ, setCirc] = useState(null);
@@ -72,9 +63,28 @@ export default function App() {
   const [exporting, setExporting] = useState(false);
   const [over, setOver] = useState(false);
   const [cur, setCur] = useState('default');
+  const [members, setMembers] = useState([]);
+  const groupLoaded = useRef(false);
   const viewRef = useRef(), prevRef = useRef(), svgRef = useRef(), fileRef = useRef(), cache = useRef(null), drag = useRef(null);
   const setP = (k, v) => setPR(o => ({ ...o, [k]: v }));
   const say = (text, err) => setStatus({ text, err: !!err });
+
+  useEffect(() => {
+    let alive = true;
+    loadGroup().then(async rows => {
+      const list = [];
+      for (const r of rows) { try { list.push(await restoreMember(r)); } catch (e) { /* skip unreadable entry */ } }
+      if (alive && list.length) setMembers(list);
+      groupLoaded.current = true;
+    });
+    return () => { alive = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!groupLoaded.current) return;
+    const t = setTimeout(() => saveGroup(members), 300);
+    return () => clearTimeout(t);
+  }, [members]);
 
   useEffect(() => {
     const t = setTimeout(() => setSrc({ id: ++srcCounter, canvas: makeSampleEye(), name: 'Example eye', sample: true }), 30);
@@ -163,6 +173,28 @@ export default function App() {
     }, 30);
   }
 
+  async function addToGroup() {
+    if (!circ || !cache.current) return;
+    if (members.length >= MAX_GROUP) { say('The group already has ' + MAX_GROUP + ' irises. Remove one in Step 3 first.', true); return; }
+    say('Adding this iris to the group…');
+    try {
+      const m = await buildMember(cache.current, 'Iris ' + (members.length + 1));
+      setMembers(list => [...list, m]);
+      say('Added ' + m.name + ' to the group (' + (members.length + 1) + ' of ' + MAX_GROUP + '). Upload the next eye photo, or scroll down to Step 3 to make group art.');
+    } catch (e) { say('Could not add this iris: ' + e.message, true); }
+  }
+
+  async function saveIris() {
+    if (!circ || !cache.current) return;
+    say('Rendering the isolated iris…');
+    await new Promise(r => setTimeout(r, 30));
+    try {
+      const art = RENDERERS.cutout(3000, cache.current, { feather: 0.12, keepPupil: true, rebuild: true });
+      await deliver(await toBlob(art, 'png'), 'iris-isolated.png');
+      say('Saved the isolated iris as a transparent PNG (3000 x 3000 px).');
+    } catch (e) { say(e && e.code === 'declined' ? 'Save cancelled.' : (e && e.message) || 'Save failed.', !(e && e.code === 'declined')); }
+  }
+
   async function doExport() {
     if (!circ || !cache.current) return;
     setExporting(true); say('Rendering ' + size + ' px. Large sizes take a few seconds…');
@@ -220,7 +252,11 @@ export default function App() {
             ) : null}
           </div>
           <div className={'status' + (status.err ? ' err' : '')} role="status">{status.text}</div>
-          <div className="btns"><button className="btn" onClick={redetect} disabled={!src}>Find iris automatically</button></div>
+          <div className="btns">
+            <button className="btn" onClick={redetect} disabled={!src}>Find iris automatically</button>
+            <button className="btn primary" onClick={addToGroup} disabled={!c}>Add this iris to the group ({members.length} of {MAX_GROUP})</button>
+            <button className="btn" onClick={saveIris} disabled={!c}>Save isolated iris (PNG)</button>
+          </div>
           {c ? (
             <div className="fields">
               <Slider label="Iris radius" value={Math.round(c.ir)} min={12} max={maxR} step={1} fmt={deg} onChange={v => setCirc(o => ({ ...o, ir: v, pr: Math.min(o.pr, v - 6) }))} />
@@ -271,6 +307,7 @@ export default function App() {
           </div>
         </section>
       </main>
+      <Group members={members} setMembers={setMembers} />
     </>
   );
 }
